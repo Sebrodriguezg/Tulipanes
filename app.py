@@ -65,29 +65,54 @@ def create_gif_from_coordinates(coordinates, colors, fps=20):
 
     try:
         fig, ax = plt.subplots(figsize=(6, 6))
-
         ax.set_aspect("equal")
         ax.axis("off")
 
-        for path, col in zip(coordinates, colors):
+        # Pre-calcular límites del dibujo
+        all_x = [p[0] for path in coordinates for p in path]
+        all_y = [-p[1] for path in coordinates for p in path]
+        if not all_x or not all_y:
+            st.warning("No se encontraron coordenadas para dibujar.")
+            return None
 
-            xs = []
-            ys = []
+        x_min, x_max = min(all_x), max(all_x)
+        y_min, y_max = min(all_y), max(all_y)
+        ax.set_xlim(x_min - 10, x_max + 10)
+        ax.set_ylim(y_min - 10, y_max + 10)
+
+
+        completed_paths = []
+
+        for path, col in zip(coordinates, colors):
+            xs, ys = [], []
 
             # Dibujar punto por punto
             for (x, y) in path:
                 xs.append(x)
                 ys.append(-y)
 
+                # Limpiar y re-dibujar todo
                 ax.clear()
                 ax.set_aspect("equal")
                 ax.axis("off")
+                ax.set_xlim(x_min - 10, x_max + 10)
+                ax.set_ylim(y_min - 10, y_max + 10)
+
+                # Re-dibujar formas ya completadas
+                for comp_path, comp_col in completed_paths:
+                    ax.fill(comp_path[0], comp_path[1], color=comp_col)
+
+                # Dibujar forma actual
                 ax.fill(xs, ys, color=col)
 
+
+                # Guardar frame
                 buf = io.BytesIO()
                 plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
                 buf.seek(0)
                 frames.append(Image.open(buf))
+
+            completed_paths.append(((xs, ys), col))
 
         plt.close()
 
@@ -116,28 +141,36 @@ def create_gif_from_coordinates(coordinates, colors, fps=20):
 
 def main():
     st.title("Generador de Figuras Animadas desde .docx")
-    st.write("La aplicación interpreta coordenadas y colores desde un archivo .docx y genera un GIF del dibujo animado.")
+    st.write("Sube un archivo .docx para generar un GIF animado del dibujo que contiene.")
 
-    uploaded_file = st.file_uploader("Sube un archivo .docx", type="docx")
+    # Carga de archivo
+    uploaded_file = st.file_uploader("Sube tu .docx aquí", type="docx")
 
-    if st.button("Generar dibujo"):
-        if uploaded_file:
-            coordinates, colors = extract_data(uploaded_file)
-        else:
-            try:
-                with open("tulipanes.docx", "rb") as f:
-                    coordinates, colors = extract_data(f)
-            except:
-                st.error("No subiste archivo y tampoco existe 'tulipanes.docx'.")
-                return
+    # Botón para generar dibujo de ejemplo
+    if st.button("Generar a partir de 'tulipanes.docx'"):
+        try:
+            with open("tulipanes.docx", "rb") as f:
+                coordinates, colors = extract_data(f)
+                if coordinates and colors:
+                    gif_bytes = create_gif_from_coordinates(coordinates, colors)
+                    if gif_bytes:
+                        st.image(gif_bytes, caption="Dibujo animado de tulipanes.docx", use_column_width=True)
+                else:
+                    st.warning("No se encontraron datos válidos en 'tulipanes.docx'.")
+        except FileNotFoundError:
+            st.error("El archivo 'tulipanes.docx' no se encontró.")
+        except Exception as e:
+            st.error(f"Ocurrió un error: {e}")
 
+    # Procesar archivo subido
+    if uploaded_file:
+        coordinates, colors = extract_data(uploaded_file)
         if coordinates and colors:
             gif_bytes = create_gif_from_coordinates(coordinates, colors)
-
             if gif_bytes:
-                st.image(gif_bytes, caption="Dibujo animado", use_column_width=True)
+                st.image(gif_bytes, caption="Dibujo animado del archivo subido", use_column_width=True)
         else:
-            st.warning("No se encontraron datos válidos en el archivo.")
+            st.warning("No se encontraron datos válidos en el archivo que subiste.")
 
 
 if __name__ == "__main__":
