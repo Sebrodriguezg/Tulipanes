@@ -1,116 +1,144 @@
 import streamlit as st
-import turtle as tu
 import re
 import docx
+import matplotlib.pyplot as plt
 from PIL import Image
 import io
 
+
+# ============================================================
+# EXTRACTOR DE DATOS DESDE .DOCX (VERSIÓN CORRECTA)
+# ============================================================
+
 def extract_data(file):
-    """Extracts coordinates and colors from a .docx file."""
+    """Extract coordinates and colors from a .docx file, compatible with tulipanes.py format."""
     try:
         data = docx.Document(file)
         coordinates = []
         colors = []
 
-        for i in data.paragraphs:
-            try:
-                coord_stg_tup = re.findall(r'\([-+]?\d*\.\d*(?:[eE][-+]?\d+)? ?\, ?[-+]?\d*\.\d*(?:[eE][-+]?\d+)?\)', i.text)
-                coord_num_tup = []
-                color_stg_tup = re.findall(r'\([-+]?\d*\.\d*(?:[eE][-+]?\d+)? ?\, ?[-+]?\d*\.\d*(?:[eE][-+]?\d+)? ?\, ?[-+]?\d*\.\d*(?:[eE][-+]?\d+)?\)', i.text)
-                color_val = re.findall(r'[-+]?\d*\.\d*', color_stg_tup[0])
-                color_val_lst = [float(k) for k in color_val]
-                colors.append(tuple(color_val_lst))
+        for paragraph in data.paragraphs:
 
-                for j in coord_stg_tup:
-                    coord_pos = re.findall(r'[-+]?\d*\.\d*', j)
-                    coord_num_lst = [float(k) for k in coord_pos]
-                    coord_num_tup.append(tuple(coord_num_lst))
+            # Buscar color (siempre primer tuple de 3 números)
+            color_match = re.findall(
+                r'\([-+]?\d*\.\d* ?\, ?[-+]?\d*\.\d* ?\, ?[-+]?\d*\.\d*\)',
+                paragraph.text
+            )
 
-                coordinates.append(coord_num_tup)
-            except:
+            if not color_match:
                 continue
 
+            # Extraer color
+            rgb_values = re.findall(r'[-+]?\d*\.\d*', color_match[0])
+            rgb_tuple = tuple(float(v) for v in rgb_values)
+            colors.append(rgb_tuple)
+
+            # Buscar coordenadas (solo tuples con 2 números)
+            coord_matches = re.findall(
+                r'\([-+]?\d*\.\d* ?\, ?[-+]?\d*\.\d*\)',
+                paragraph.text
+            )
+
+            coord_list = []
+            for c in coord_matches:
+                vals = re.findall(r'[-+]?\d*\.\d*', c)
+                if len(vals) == 2:
+                    coord_list.append( (float(vals[0]), float(vals[1])) )
+
+            coordinates.append(coord_list)
+
         return coordinates, colors
+
     except Exception as e:
-        st.error(f"Error reading .docx file: {e}")
+        st.error(f"Error al leer el archivo .docx: {e}")
         return None, None
 
-def create_drawing(coordinates, colors):
-    """Creates a drawing from coordinates and colors and returns it as a PNG image."""
+
+
+# ============================================================
+# CREAR GIF ANIMADO
+# ============================================================
+
+def create_gif_from_coordinates(coordinates, colors, fps=20):
+    """Genera un GIF animado mostrando cómo se dibuja la figura paso a paso."""
+    frames = []
+
     try:
-        # Create a new turtle screen for each drawing
-        screen = tu.Screen()
-        screen.setup(width=800, height=600)  # Set a default screen size
+        fig, ax = plt.subplots(figsize=(6, 6))
 
-        pen = tu.Turtle()
-        pen.speed(0)
-        tu.hideturtle()
+        ax.set_aspect("equal")
+        ax.axis("off")
 
-        for i in range(len(coordinates)):
-            draw = 1
-            path = coordinates[i]
-            col = colors[i]
-            pen.color(col)
-            pen.begin_fill()
-            for order_pair in path:
-                x, y = order_pair
-                y = -1 * y
-                if draw:
-                    pen.up()
-                    pen.goto(x, y)
-                    pen.down()
-                    draw = 0
-                else:
-                    pen.goto(x, y)
-            pen.end_fill()
+        for path, col in zip(coordinates, colors):
 
-        # Save the drawing to a PostScript file
-        ps_file = "drawing.ps"
-        screen.getcanvas().postscript(file=ps_file)
+            xs = []
+            ys = []
 
-        # Convert the PostScript file to a PNG image
-        img = Image.open(ps_file)
+            # Dibujar punto por punto
+            for (x, y) in path:
+                xs.append(x)
+                ys.append(-y)
 
-        # Crop the image to remove unnecessary whitespace
-        cropped_img = img.crop(img.getbbox())
+                ax.clear()
+                ax.set_aspect("equal")
+                ax.axis("off")
+                ax.fill(xs, ys, color=col)
 
-        img_byte_arr = io.BytesIO()
-        cropped_img.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
+                buf = io.BytesIO()
+                plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
+                buf.seek(0)
+                frames.append(Image.open(buf))
 
-        # Clear the screen and reset turtle state
-        screen.clear()
-        tu.TurtleScreen._RUNNING = True
+        plt.close()
 
-        return img_byte_arr
+        # Guardar GIF
+        gif_bytes = io.BytesIO()
+        frames[0].save(
+            gif_bytes,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=int(1000 / fps),
+            loop=0
+        )
+        gif_bytes.seek(0)
+        return gif_bytes
+
     except Exception as e:
-        st.error(f"Error creating drawing: {e}")
+        st.error(f"Error creando el GIF: {e}")
         return None
 
+
+
+# ============================================================
+# APLICACIÓN STREAMLIT
+# ============================================================
+
 def main():
-    st.title("Turtle Drawing Generator")
-    st.write("This application generates a drawing from a .docx file.")
+    st.title("Generador de Figuras Animadas desde .docx")
+    st.write("La aplicación interpreta coordenadas y colores desde un archivo .docx y genera un GIF del dibujo animado.")
 
-    uploaded_file = st.file_uploader("Choose a .docx file", type="docx")
+    uploaded_file = st.file_uploader("Sube un archivo .docx", type="docx")
 
-    if st.button("Generate Drawing"):
-        if uploaded_file is not None:
+    if st.button("Generar dibujo"):
+        if uploaded_file:
             coordinates, colors = extract_data(uploaded_file)
-            if coordinates and colors:
-                image = create_drawing(coordinates, colors)
-                if image:
-                    st.image(image, caption="Generated Drawing", use_column_width=True)
-            else:
-                st.warning("No valid data found in the uploaded file.")
         else:
-            with open("tulipanes.docx", "rb") as f:
-                coordinates, colors = extract_data(f)
-                if coordinates and colors:
-                    image = create_drawing(coordinates, colors)
-                    if image:
-                        st.image(image, caption="Generated Drawing", use_column_width=True)
-                else:
-                    st.error("Could not generate the drawing from the default file.")
+            try:
+                with open("tulipanes.docx", "rb") as f:
+                    coordinates, colors = extract_data(f)
+            except:
+                st.error("No subiste archivo y tampoco existe 'tulipanes.docx'.")
+                return
+
+        if coordinates and colors:
+            gif_bytes = create_gif_from_coordinates(coordinates, colors)
+
+            if gif_bytes:
+                st.image(gif_bytes, caption="Dibujo animado", use_column_width=True)
+        else:
+            st.warning("No se encontraron datos válidos en el archivo.")
+
 
 if __name__ == "__main__":
     main()
